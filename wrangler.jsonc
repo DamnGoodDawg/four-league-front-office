@@ -1,0 +1,23 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "four-league-front-office",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-09-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": { "enabled": true, "head_sampling_rate": 1 },
+  // Sync every 15 minutes; advice regenerates with each sync.
+  "triggers": { "crons": ["*/15 * * * *"] },
+  // Non-secret vars only. League IDs, team IDs, cookies, and the dashboard
+  // token are secrets (wrangler secret put / .dev.vars) — this file is public.
+  "vars": {
+    "ESPN_SEASON": "2026"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "four-league-db",
+      "database_id": "04157bb1-50b8-4041-b7a8-66a0caef9edf",
+      "migrations_dir": "./migrations"
+    }
+  ]
+}

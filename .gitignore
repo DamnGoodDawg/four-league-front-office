@@ -10,3 +10,4 @@ dist/
 
 # OS noise
 .DS_Store
+worker-configuration.d.ts
