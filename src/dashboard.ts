@@ -138,6 +138,10 @@ const slotRank = (s) => { const i = SLOT_ORDER.indexOf(s); return i < 0 ? 99 : i
 function rosterBlock(lg) {
   const rows = [...lg.roster].sort((a, b) =>
     b.is_starter - a.is_starter || slotRank(a.slot) - slotRank(b.slot) || b.proj - a.proj);
+  if (!rows.length) {
+    return \`<details><summary>\${esc(lg.my_team?.name ?? lg.name)} <span class="lg-name">\${esc(lg.name)}</span></summary>
+      <div class="empty" style="padding:10px 14px">Player-level roster for this league arrives with the Yahoo API (application under review).</div></details>\`;
+  }
   const tr = rows.map((r) => \`<tr class="\${r.is_starter ? "" : "bench"}">
     <td>\${esc(r.slot)}</td><td>\${esc(r.player)} <span class="st \${esc(r.status)}">\${r.status && r.status !== "ACTIVE" && r.status !== "NORMAL" ? esc(r.status[0] + r.status.slice(1).toLowerCase().replace("_", " ")) : ""}</span></td>
     <td class="num">\${f1(r.proj)}</td><td class="num">\${f1(r.actual)}</td></tr>\`).join("");
@@ -150,7 +154,8 @@ function render(d) {
   const weeks = [...new Set(d.leagues.map((l) => l.week))];
   $("weekLabel").textContent = weeks.length ? \`Week \${weeks.join("/")}\` : "";
   $("syncTime").textContent = "updated " + new Date(d.generated_at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-  $("cards").innerHTML = d.leagues.map(leagueCard).join("") + yahooCard(d.yahoo);
+  const hasYahoo = d.leagues.some((l) => l.platform === "yahoo");
+  $("cards").innerHTML = d.leagues.map(leagueCard).join("") + (hasYahoo ? "" : yahooCard(d.yahoo));
   const alerts = d.leagues.flatMap((lg) => lg.alerts.map((a) => ({ ...a, lg })));
   $("alerts").innerHTML = alerts.length
     ? alerts.map((a) => \`<div class="alert"><span class="tag \${a.severity}">\${a.severity === "critical" ? "ACT" : a.severity === "warning" ? "CHECK" : "TIP"}</span>
@@ -175,8 +180,18 @@ $("syncBtn").addEventListener("click", async () => {
   try { await fetch("/api/sync", { method: "POST" }); await load(); } finally { b.disabled = false; b.textContent = "Sync now"; }
 });
 
+let tick = 0;
+async function heartbeat() {
+  tick++;
+  // While you're actually looking at it, pull fresh platform data every 3rd tick.
+  if (document.visibilityState === "visible" && tick % 3 === 0) {
+    try { await fetch("/api/sync", { method: "POST" }); } catch {}
+  }
+  await load();
+}
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") load(); });
 load();
-setInterval(load, 60000);
+setInterval(heartbeat, 60000);
 </script>
 </body>
 </html>`;

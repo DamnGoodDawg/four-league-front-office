@@ -1,7 +1,7 @@
 import { generateAdvice } from "./advice";
 import { fetchEspnLeague } from "./espn";
 import type { AdviceItem, NormalizedLeague } from "./model";
-import { probeYahoo } from "./yahoo";
+import { fetchYahooLeague } from "./yahoo";
 
 export interface SyncReport {
   ok: boolean;
@@ -110,7 +110,16 @@ export async function runSync(env: Env): Promise<SyncReport> {
     }
   }
 
-  const yahoo = await probeYahoo(env);
+  const yahoo = await fetchYahooLeague(env);
+  if (yahoo.status === "ok" && yahoo.data) {
+    try {
+      const advice = generateAdvice(yahoo.data.league, yahoo.data.rosters);
+      await persistLeague(env, yahoo.data, advice);
+    } catch (err) {
+      yahoo.status = "error";
+      yahoo.detail = `persist failed: ${err instanceof Error ? err.message : String(err)}`;
+    }
+  }
   results.push({ source: "yahoo", status: yahoo.status, detail: yahoo.detail });
   if (yahoo.status !== "skipped") {
     await logSync(env, "yahoo", yahoo.status, yahoo.detail);
