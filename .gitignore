@@ -1,0 +1,12 @@
+# Secrets — never committed
+.env
+.dev.vars
+*.pem
+
+# Dependencies & build output
+node_modules/
+dist/
+.wrangler/
+
+# OS noise
+.DS_Store
