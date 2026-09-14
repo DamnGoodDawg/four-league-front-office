@@ -492,12 +492,19 @@ function render(d) {
   renderHealth(d); renderHome(d); renderHomeWaivers(d);
   $("fronts").innerHTML = d.leagues.map(frontCard).join("");
   renderWaivers(d); renderForces(d); renderIntel(d); renderBriefs(d);
+  WRITE_BLOCKED = d.health.some((h) => h.status === "blocked");
   const errs = d.sync_log.filter((s) => s.status !== "ok" && s.status !== "session-ok").length;
   $("log").innerHTML = d.sync_log.slice(0, 4).map((s) => \`<div>\${esc(s.at.slice(11, 19))}Z · \${esc(s.source)} · \${esc(s.status)}</div>\`).join("");
   lastFetch = Date.now();
   tickUplink(errs > 0);
 }
+let WRITE_BLOCKED = false;
 function tickUplink(hasErr) {
+  if (WRITE_BLOCKED) {
+    $("updot").className = "dot stale";
+    $("uptext").textContent = "Updates paused — showing last synced data";
+    return;
+  }
   const age = Math.round((Date.now() - lastFetch) / 1000);
   $("updot").className = "dot" + (hasErr ? " dead" : age > 360 ? " stale" : "");
   $("uptext").textContent = lastFetch ? (age < 8 ? "Updated just now" : \`Updated \${age}s ago\`) : "Connecting…";

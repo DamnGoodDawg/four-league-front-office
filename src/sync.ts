@@ -167,7 +167,7 @@ async function persistLeague(env: Env, data: NormalizedLeague, advice: AdviceIte
  * effort — isolates vary — but it beats claiming freshness during a block.
  */
 export const writeHealth = { blocked: false, detail: "", at: "" };
-function noteWriteFailure(err: unknown): void {
+export function noteWriteFailure(err: unknown): void {
   writeHealth.blocked = true;
   writeHealth.detail = err instanceof Error ? err.message.slice(0, 200) : String(err).slice(0, 200);
   writeHealth.at = new Date().toISOString();

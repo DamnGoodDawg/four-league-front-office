@@ -1,5 +1,5 @@
 import type { AdviceItem, LeagueRow, MatchupRow, RosterSlotRow, TeamRow } from "./model";
-import { writeHealth } from "./sync";
+import { noteWriteFailure, writeHealth } from "./sync";
 import { yahooLeagueLink } from "./yahoo";
 
 export interface StandingRow {
@@ -71,6 +71,7 @@ export interface DataPayload {
 }
 
 const SEVERITY_ORDER = `CASE severity WHEN 'critical' THEN 0 WHEN 'warning' THEN 1 ELSE 2 END`;
+let lastCanaryAt = 0;
 
 async function zeroStarterCount(env: Env, leagueId: string, teamId: string, week: number): Promise<number | null> {
   const row = await env.DB.prepare(
@@ -85,6 +86,24 @@ async function zeroStarterCount(env: Env, leagueId: string, teamId: string, week
 }
 
 export async function buildData(env: Env): Promise<DataPayload> {
+  // Writability canary IN the request path so the "updates paused" banner
+  // reaches every page load during a write block. It must write a REAL row —
+  // Cloudflare meters rows written, so zero-row statements succeed even while
+  // blocked. One heartbeat row, filtered from every view, throttled to one
+  // write per 2 min per isolate; while blocked it retries every fetch (those
+  // attempts write nothing) so recovery is noticed promptly.
+  if (writeHealth.blocked || Date.now() - lastCanaryAt > 120_000) {
+    try {
+      await env.DB.prepare(
+        `INSERT OR REPLACE INTO trending (player_name, position, pro_team, adds, fetched_at) VALUES ('__canary__', '', '', 0, ?1)`,
+      ).bind(new Date().toISOString()).run();
+      writeHealth.blocked = false;
+      lastCanaryAt = Date.now();
+    } catch (err) {
+      noteWriteFailure(err);
+    }
+  }
+
   const leagues = (await env.DB.prepare(`SELECT * FROM leagues ORDER BY name`).all<LeagueRow>()).results;
   const views: LeagueView[] = [];
 
@@ -180,9 +199,9 @@ export async function buildData(env: Env): Promise<DataPayload> {
   }
 
   const trending = (
-    await env.DB.prepare(`SELECT player_name, position, pro_team, adds FROM trending ORDER BY adds DESC`).all<
-      DataPayload["trending"][number]
-    >()
+    await env.DB.prepare(
+      `SELECT player_name, position, pro_team, adds FROM trending WHERE player_name != '__canary__' ORDER BY adds DESC`,
+    ).all<DataPayload["trending"][number]>()
   ).results;
 
   const health = (
