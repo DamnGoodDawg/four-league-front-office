@@ -10,6 +10,8 @@ export interface LeagueRow {
   current_week: number;
   deep_link: string;
   updated_at: string;
+  faab_budget: number | null;
+  faab_spent: number | null;
 }
 
 export interface TeamRow {

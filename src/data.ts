@@ -30,12 +30,22 @@ export interface LeagueView {
     /** null when we don't sync that opponent's roster (Yahoo, until Phase 2). */
     opp_zero: number | null;
   } | null;
-  alerts: Array<Pick<AdviceItem, "type" | "severity" | "message" | "deep_link">>;
+  alerts: Array<Pick<AdviceItem, "type" | "severity" | "message" | "deep_link"> & { source: string }>;
   roster: Array<{
     slot: string; player: string; position: string; status: string;
     proj: number; actual: number; is_starter: number;
   }>;
+  opp_roster: Array<{
+    slot: string; player: string; position: string; status: string;
+    proj: number; actual: number; is_starter: number;
+  }>;
   standings: StandingRow[];
+  faab: { budget: number; spent: number } | null;
+  waivers: Array<{
+    name: string; position: string; pro_team: string;
+    proj: number | null; pct_owned: number | null; note: string; trending: number | null;
+  }>;
+  players_link: string;
 }
 
 export interface BriefingRow {
@@ -51,6 +61,8 @@ export interface DataPayload {
   generated_at: string;
   leagues: LeagueView[];
   briefings: BriefingRow[];
+  trending: Array<{ player_name: string; position: string; pro_team: string; adds: number }>;
+  health: Array<{ source: string; status: string; detail: string; at: string }>;
   yahoo: { configured: boolean; link: string; note: string };
   sync_log: Array<{ source: string; status: string; detail: string; at: string }>;
 }
@@ -103,18 +115,36 @@ export async function buildData(env: Env): Promise<DataPayload> {
 
     const alerts = (
       await env.DB.prepare(
-        `SELECT type, severity, message, deep_link FROM advice
+        `SELECT type, severity, message, deep_link, source FROM advice
          WHERE league_id = ?1 AND week = ?2 ORDER BY ${SEVERITY_ORDER}, id`,
-      ).bind(lg.id, lg.current_week).all<AdviceItem>()
+      ).bind(lg.id, lg.current_week).all<AdviceItem & { source: string }>()
     ).results;
 
-    const roster = (
-      await env.DB.prepare(
+    const rosterQuery = (teamId: string) =>
+      env.DB.prepare(
         `SELECT slot, player_name AS player, position, injury_status AS status,
                 proj_points AS proj, actual_points AS actual, is_starter
          FROM roster_slots WHERE league_id = ?1 AND team_id = ?2 AND week = ?3`,
-      ).bind(lg.id, lg.my_team_id, lg.current_week).all<LeagueView["roster"][number]>()
+      ).bind(lg.id, teamId, lg.current_week).all<LeagueView["roster"][number]>();
+
+    const roster = (await rosterQuery(lg.my_team_id)).results;
+    const oppId = matchup
+      ? (matchup.home_team_id === lg.my_team_id ? matchup.away_team_id : matchup.home_team_id)
+      : null;
+    const oppRoster = oppId ? (await rosterQuery(oppId)).results : [];
+
+    const waivers = (
+      await env.DB.prepare(
+        `SELECT w.name, w.position, w.pro_team, w.proj, w.pct_owned, w.note, t.adds AS trending
+         FROM waiver_candidates w LEFT JOIN trending t ON t.player_name = w.name
+         WHERE w.league_id = ?1
+         ORDER BY CASE WHEN w.proj IS NULL THEN 1 ELSE 0 END, w.proj DESC, w.pct_owned DESC`,
+      ).bind(lg.id).all<LeagueView["waivers"][number]>()
     ).results;
+
+    const playersLink = lg.platform === "espn"
+      ? `https://fantasy.espn.com/football/players/add?leagueId=${lg.platform_league_id}`
+      : `https://football.fantasysports.yahoo.com/f1/${lg.platform_league_id}/players?status=A`;
 
     const standings: StandingRow[] = teams
       .map((t) => ({
@@ -131,11 +161,28 @@ export async function buildData(env: Env): Promise<DataPayload> {
       deep_link: lg.deep_link,
       my_team: me ? { id: me.team_id, name: me.name, wins: me.wins, losses: me.losses, ties: me.ties } : null,
       matchup: matchupView,
-      alerts: alerts.map((a) => ({ type: a.type, severity: a.severity, message: a.message, deep_link: a.deep_link })),
+      alerts: alerts.map((a) => ({ type: a.type, severity: a.severity, message: a.message, deep_link: a.deep_link, source: a.source })),
       roster,
+      opp_roster: oppRoster,
       standings,
+      faab: lg.faab_budget != null ? { budget: lg.faab_budget, spent: lg.faab_spent ?? 0 } : null,
+      waivers,
+      players_link: playersLink,
     });
   }
+
+  const trending = (
+    await env.DB.prepare(`SELECT player_name, position, pro_team, adds FROM trending ORDER BY adds DESC`).all<
+      DataPayload["trending"][number]
+    >()
+  ).results;
+
+  const health = (
+    await env.DB.prepare(
+      `SELECT source, status, detail, at FROM sync_log
+       WHERE id IN (SELECT MAX(id) FROM sync_log GROUP BY source) ORDER BY source`,
+    ).all<DataPayload["health"][number]>()
+  ).results;
 
   const briefings = (
     await env.DB.prepare(
@@ -155,6 +202,8 @@ export async function buildData(env: Env): Promise<DataPayload> {
     generated_at: new Date().toISOString(),
     leagues: views,
     briefings,
+    trending,
+    health,
     yahoo: {
       configured: yahooConfigured,
       link: yahooLeagueLink(env.YAHOO_LEAGUE_ID ?? "", env.YAHOO_TEAM_ID),

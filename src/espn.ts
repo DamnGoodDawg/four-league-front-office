@@ -41,6 +41,7 @@ interface EspnTeam {
   nickname?: string;
   record?: { overall?: { wins?: number; losses?: number; ties?: number; pointsFor?: number } };
   roster?: { entries?: EspnRosterEntry[] };
+  transactionCounter?: { acquisitionBudgetSpent?: number };
 }
 
 interface EspnMatchupSide {
@@ -59,7 +60,10 @@ interface EspnScheduleItem {
 interface EspnLeagueResponse {
   scoringPeriodId?: number;
   status?: { currentMatchupPeriod?: number };
-  settings?: { name?: string };
+  settings?: {
+    name?: string;
+    acquisitionSettings?: { acquisitionBudget?: number; isUsingAcquisitionBudget?: boolean };
+  };
   teams?: EspnTeam[];
   schedule?: EspnScheduleItem[];
 }
@@ -83,6 +87,81 @@ function weeklyStat(stats: EspnStat[] | undefined, week: number, sourceId: numbe
   return typeof s?.appliedTotal === "number" ? s.appliedTotal : 0;
 }
 
+const PRO_TEAM: Record<number, string> = {
+  1: "Atl", 2: "Buf", 3: "Chi", 4: "Cin", 5: "Cle", 6: "Dal", 7: "Den", 8: "Det",
+  9: "GB", 10: "Ten", 11: "Ind", 12: "KC", 13: "LV", 14: "LAR", 15: "Mia", 16: "Min",
+  17: "NE", 18: "NO", 19: "NYG", 20: "NYJ", 21: "Phi", 22: "Ari", 23: "Pit", 24: "LAC",
+  25: "SF", 26: "Sea", 27: "TB", 28: "Wsh", 29: "Car", 30: "Jax", 33: "Bal", 34: "Hou",
+};
+
+export interface FreeAgentRow {
+  player_id: string;
+  name: string;
+  position: string;
+  pro_team: string;
+  proj: number;
+  pct_owned: number;
+  note: string;
+}
+
+interface EspnFreeAgentEntry {
+  id?: number;
+  onTeamId?: number;
+  status?: string;
+  player?: EspnPlayer & { proTeamId?: number; ownership?: { percentOwned?: number } };
+}
+
+/** Top free agents / waiver players by weekly projection, a few per position. */
+export async function fetchEspnFreeAgents(
+  args: Omit<EspnLeagueArgs, "myTeamId">, week: number, perPosition = 8,
+): Promise<FreeAgentRow[]> {
+  const url =
+    `${READS_BASE}/seasons/${args.season}/segments/0/leagues/${args.leagueId}?view=kona_player_info&scoringPeriodId=${week}`;
+  const filter = {
+    players: {
+      filterStatus: { value: ["FREEAGENT", "WAIVERS"] },
+      limit: 150,
+      sortPercOwned: { sortAsc: false, sortPriority: 1 },
+    },
+  };
+  const res = await fetch(url, {
+    headers: {
+      Cookie: `espn_s2=${args.s2}; SWID=${args.swid}`,
+      Accept: "application/json",
+      "X-Fantasy-Filter": JSON.stringify(filter),
+    },
+  });
+  if (!res.ok) throw new Error(`ESPN free agents ${args.leagueId}: HTTP ${res.status}`);
+  const data = (await res.json()) as { players?: EspnFreeAgentEntry[] };
+
+  const rows: FreeAgentRow[] = [];
+  for (const e of data.players ?? []) {
+    const p = e.player;
+    if (!p) continue;
+    rows.push({
+      player_id: String(e.id ?? p.id ?? p.fullName ?? "unknown"),
+      name: p.fullName ?? "Unknown",
+      position: POSITION_BY_ID[p.defaultPositionId ?? -1] ?? "?",
+      pro_team: PRO_TEAM[p.proTeamId ?? -1] ?? "",
+      proj: weeklyStat(p.stats, week, 1),
+      pct_owned: Math.round((p.ownership?.percentOwned ?? 0) * 10) / 10,
+      note: e.status === "WAIVERS" ? "Waivers" : "FA",
+    });
+  }
+  const byPos = new Map<string, FreeAgentRow[]>();
+  for (const r of rows) {
+    const list = byPos.get(r.position) ?? [];
+    list.push(r);
+    byPos.set(r.position, list);
+  }
+  const out: FreeAgentRow[] = [];
+  for (const list of byPos.values()) {
+    list.sort((a, b) => b.proj - a.proj);
+    out.push(...list.slice(0, perPosition));
+  }
+  return out;
+}
+
 export async function fetchEspnLeague(args: EspnLeagueArgs): Promise<NormalizedLeague> {
   const url =
     `${READS_BASE}/seasons/${args.season}/segments/0/leagues/${args.leagueId}` +
@@ -104,6 +183,9 @@ export async function fetchEspnLeague(args: EspnLeagueArgs): Promise<NormalizedL
   const leagueId = `espn:${args.leagueId}`;
   const now = new Date().toISOString();
 
+  const acq = data.settings?.acquisitionSettings;
+  const usesFaab = acq?.isUsingAcquisitionBudget !== false && (acq?.acquisitionBudget ?? 0) > 0;
+  const myTeamRaw = (data.teams ?? []).find((t) => String(t.id) === args.myTeamId);
   const league: LeagueRow = {
     id: leagueId,
     platform: "espn",
@@ -114,6 +196,8 @@ export async function fetchEspnLeague(args: EspnLeagueArgs): Promise<NormalizedL
     current_week: week,
     deep_link: espnTeamLink(args.season, args.leagueId, args.myTeamId),
     updated_at: now,
+    faab_budget: usesFaab ? (acq?.acquisitionBudget ?? null) : null,
+    faab_spent: usesFaab ? (myTeamRaw?.transactionCounter?.acquisitionBudgetSpent ?? 0) : null,
   };
 
   const teams: TeamRow[] = [];

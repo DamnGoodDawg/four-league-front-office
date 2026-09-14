@@ -217,11 +217,28 @@ export async function fetchYahooLeague(env: Env): Promise<YahooResult> {
       id, platform: "yahoo", platform_league_id: leagueId, name: leagueName,
       season: Number(env.ESPN_SEASON), my_team_id: myTeam, current_week: week,
       deep_link: yahooLeagueLink(leagueId, myTeam), updated_at: now,
+      faab_budget: null, faab_spent: null,
     };
-    const teams: TeamRow[] = [
-      { league_id: id, team_id: myTeam, name: myName, wins: +w, losses: +l, ties: +t, points_for: myScore, is_mine: 1 },
-      { league_id: id, team_id: oppTeam, name: oppName, wins: 0, losses: 0, ties: 0, points_for: oppScore, is_mine: 0 },
-    ];
+
+    // Full standings from the league home; fall back to the me/opp pair.
+    let teams = parseStandings(home.html, leagueId, myTeam);
+    if (teams.length < 4) {
+      teams = [
+        { league_id: id, team_id: myTeam, name: myName, wins: +w, losses: +l, ties: +t, points_for: myScore, is_mine: 1 },
+        { league_id: id, team_id: oppTeam, name: oppName, wins: 0, losses: 0, ties: 0, points_for: oppScore, is_mine: 0 },
+      ];
+    }
+
+    // Opponent roster (one extra page) so yet-to-play counts work on Yahoo too.
+    let rosters2 = rosters;
+    if (oppTeam !== "opp") {
+      try {
+        const oppPage = await get(yahooLeagueLink(leagueId, oppTeam), cookie);
+        if (oppPage.status === 200 && !looksLikeLogin(oppPage.status, oppPage.location, oppPage.html)) {
+          rosters2 = rosters.concat(parseRoster(oppPage.html, leagueId, oppTeam, week));
+        }
+      } catch { /* opponent roster is nice-to-have; never fail the sync for it */ }
+    }
     const matchups: MatchupRow[] = [
       {
         league_id: id, week, matchup_id: `${myTeam}-${oppTeam}`,
@@ -232,10 +249,95 @@ export async function fetchYahooLeague(env: Env): Promise<YahooResult> {
 
     return {
       status: "ok",
-      detail: `"${leagueName}" week ${week}: ${myName} ${myScore} vs ${oppName} ${oppScore}${rosterNote}`,
-      data: { league, teams, matchups, rosters },
+      detail: `"${leagueName}" week ${week}: ${myName} ${myScore} vs ${oppName} ${oppScore}${rosterNote}; ${teams.length} teams in standings`,
+      data: { league, teams, matchups, rosters: rosters2 },
     };
   } catch (err) {
     return { status: "error", detail: err instanceof Error ? err.message : String(err) };
   }
+}
+
+/** Standings from the league home: rows whose anchor is /f1/<league>/<n>. */
+function parseStandings(homeHtml: string, leagueId: string, myTeam: string): TeamRow[] {
+  const root = parse(homeHtml);
+  const out = new Map<string, TeamRow>();
+  const recordRe = /^(\d+)-(\d+)-(\d+)$/;
+  for (const a of root.querySelectorAll(`a[href*="/f1/${leagueId}/"]`)) {
+    const href = a.getAttribute("href") ?? "";
+    const m = href.match(new RegExp(`/f1/${leagueId}/(\\d+)$`));
+    const name = (a.text ?? "").replace(/\s+/g, " ").trim();
+    if (!m || !name) continue;
+    const row = a.closest("tr");
+    if (!row) continue;
+    const cells = row.querySelectorAll("td").map((td) => (td.text ?? "").replace(/\s+/g, " ").trim());
+    const recIdx = cells.findIndex((c) => recordRe.test(c));
+    if (recIdx < 0) continue;
+    const [, w, l, t] = cells[recIdx].match(recordRe)!;
+    const pf = parseFloat(cells[recIdx + 1] ?? "");
+    out.set(m[1], {
+      league_id: `yahoo:${leagueId}`,
+      team_id: m[1],
+      name,
+      wins: +w, losses: +l, ties: +t,
+      points_for: Number.isFinite(pf) ? pf : 0,
+      is_mine: m[1] === myTeam ? 1 : 0,
+    });
+  }
+  return [...out.values()];
+}
+
+export interface YahooWaiverRow {
+  player_id: string;
+  name: string;
+  position: string;
+  pro_team: string;
+  pct_owned: number | null;
+  last_points: number | null;
+  note: string;
+}
+
+/**
+ * Top available players per position from the classic players page
+ * (status=A, sorted by fantasy points). No weekly projection column in this
+ * view — % rostered + points so far are the v1 signals; ESPN and Sleeper
+ * trending carry projections/momentum for cross-reference.
+ */
+export async function fetchYahooWaivers(env: Env, perPosition = 6): Promise<YahooWaiverRow[]> {
+  const cookie = env.YAHOO_COOKIE ?? "";
+  const leagueId = env.YAHOO_LEAGUE_ID ?? "";
+  if (!cookie || !leagueId) return [];
+  const out: YahooWaiverRow[] = [];
+  for (const pos of ["QB", "RB", "WR", "TE"]) {
+    try {
+      const url = `https://football.fantasysports.yahoo.com/f1/${leagueId}/players?status=A&pos=${pos}&sort=PTS&sdir=1`;
+      const page = await get(url, cookie);
+      if (page.status !== 200 || looksLikeLogin(page.status, page.location, page.html)) continue;
+      const root = parse(page.html);
+      const seen = new Set<string>();
+      for (const a of root.querySelectorAll("a[data-ys-playerid]")) {
+        if (out.filter((r) => r.position === pos).length >= perPosition) break;
+        const pid = a.getAttribute("data-ys-playerid") ?? "";
+        if (!pid || seen.has(pid)) continue;
+        seen.add(pid);
+        const row = a.closest("tr");
+        if (!row) continue;
+        const cells = row.querySelectorAll("td").map((td) => (td.text ?? "").replace(/\s+/g, " ").trim());
+        if (cells.length < 8) continue;
+        const blob = cells[2] ?? "";
+        const teamPos = blob.match(/\b([A-Z][A-Za-z]{1,2}) - ([A-Z/]{1,4})\b/);
+        const pct = (cells.find((c) => /^\d+%$/.test(c)) ?? "").replace("%", "");
+        const pts = parseFloat(cells[6] ?? "");
+        out.push({
+          player_id: pid,
+          name: (a.text ?? "").replace(/\s+/g, " ").trim(),
+          position: teamPos?.[2] ?? pos,
+          pro_team: teamPos?.[1] ?? "",
+          pct_owned: pct ? Number(pct) : null,
+          last_points: Number.isFinite(pts) ? pts : null,
+          note: /^W\b/.test(cells[3] ?? "") ? `Waivers — ${cells[3]}` : "FA",
+        });
+      }
+    } catch { /* per-position failures are non-fatal */ }
+  }
+  return out;
 }

@@ -200,6 +200,15 @@ export function renderShell(): string {
   .article li { margin:4px 0; }
   .article em { color:var(--dim); }
 
+  .hbanner { border:1px solid rgba(224,106,85,.45); background:var(--down-deep); color:#F2B3A6;
+    border-radius:10px; padding:10px 14px; margin-bottom:12px; font-size:12.5px; line-height:1.55; }
+  .hbanner b { color:#FFD9D0; }
+  .trend { color:var(--up); font:600 10.5px var(--mono); margin-left:7px; white-space:nowrap; }
+  .wpanel { border:1px solid var(--line); border-radius:12px; background:var(--panel); overflow:hidden; margin-bottom:12px; }
+  .wpanel h3 { display:flex; align-items:center; gap:8px; margin:0; padding:10px 12px;
+    font:500 12px var(--sys); color:var(--dim); border-bottom:1px solid var(--line); }
+  .wpanel h3 .faab { margin-left:auto; font:500 11px var(--mono); color:var(--warn); }
+  .wpanel .plink { padding:9px 12px; font:600 12px var(--sys); border-top:1px solid var(--line); text-align:right; }
   footer { margin-top:26px; border-top:1px solid var(--line); padding:12px 0 8px;
     font:400 11px var(--sys); color:var(--faint); }
   footer .log { font-family:var(--mono); font-size:10px; margin-top:6px; }
@@ -224,6 +233,7 @@ export function renderShell(): string {
   <nav class="rail" role="tablist">
     <button class="tab" role="tab" data-board="home" aria-selected="true">Home<span class="n zero" id="threatN">0</span></button>
     <button class="tab" role="tab" data-board="matchups">Matchups</button>
+    <button class="tab" role="tab" data-board="waivers">Waivers</button>
     <button class="tab" role="tab" data-board="rosters">Rosters</button>
     <button class="tab" role="tab" data-board="standings">Standings</button>
     <button class="tab" role="tab" data-board="briefings">Briefings</button>
@@ -231,15 +241,19 @@ export function renderShell(): string {
   </div>
 
   <section class="board" id="board-home">
+    <div id="homeHealth"></div>
     <div class="stats" id="homeStats"></div>
     <div class="shead" id="homeAlertsHead">Needs your attention</div>
     <div id="homeAlerts"></div>
+    <div class="shead">Waiver watch</div>
+    <div class="miniwrap" id="homeWaivers"></div>
     <div class="shead">Your matchups</div>
     <div class="miniwrap" id="homeMini"></div>
     <div class="shead">Latest briefing</div>
     <div id="homeBrief"></div>
   </section>
   <section class="board" id="board-matchups" hidden><div class="fronts" id="fronts"></div></section>
+  <section class="board" id="board-waivers" hidden><div id="waiverPanels"></div></section>
   <section class="board" id="board-rosters" hidden><div class="selchips" id="forceChips"></div><div id="forceTable"></div></section>
   <section class="board" id="board-standings" hidden><div class="intel" id="intel"></div></section>
   <section class="board" id="board-briefings" hidden><div id="briefs"></div></section>
@@ -270,6 +284,61 @@ function alertCard(a) {
   return \`<div class="acard \${a.severity}"><span class="sevc \${a.severity}">\${SEV[a.severity]}</span>
     <div class="msg">\${esc(a.message)}<span class="src">\${esc(a.lg.name)}</span></div>
     <a class="go" href="\${esc(a.deep_link)}" target="_blank" rel="noopener">Open in \${platformLabel(a.lg.platform)} →</a></div>\`;
+}
+
+const OK_STATUSES = new Set(["ok", "session-ok", "skipped"]);
+function renderHealth(d) {
+  const bad = d.health.filter((h) => !OK_STATUSES.has(h.status));
+  if (!bad.length) { $("homeHealth").innerHTML = ""; return; }
+  const lines = bad.map((h) => {
+    const hint = h.status === "session-expired"
+      ? " — sign in on that platform, copy the cookie again, and update the secret."
+      : "";
+    return \`<div><b>\${esc(h.source)}</b>: \${esc(h.detail || h.status)}\${hint}</div>\`;
+  }).join("");
+  $("homeHealth").innerHTML = \`<div class="hbanner"><b>Data feed needs attention.</b>\${lines}</div>\`;
+}
+
+function renderHomeWaivers(d) {
+  // One headline candidate per league (best projection, or most-added where
+  // projections are unknown), so the watch spans all four leagues.
+  const seen = new Set();
+  const cand = d.leagues
+    .map((lg) => {
+      const w = [...lg.waivers].sort((a, b) =>
+        (b.proj ?? -1) - (a.proj ?? -1) || (b.trending ?? 0) - (a.trending ?? 0) || (b.pct_owned ?? 0) - (a.pct_owned ?? 0))[0];
+      return w ? { ...w, lg } : null;
+    })
+    .filter(Boolean)
+    .filter((w) => (seen.has(w.name + w.lg.id) ? false : seen.add(w.name + w.lg.id)));
+  if (!cand.length) {
+    $("homeWaivers").innerHTML = '<div class="empty">Waiver data refreshes twice a day — nothing loaded yet.</div>';
+    return;
+  }
+  $("homeWaivers").innerHTML = cand.map((w) => \`<div class="mini">
+    <span class="lgc">\${esc(tickerCode(w.lg.name))}</span>
+    <span class="who"><b>\${esc(w.name)}</b> <span>\${esc(w.position)}\${w.pro_team ? " · " + esc(w.pro_team) : ""}</span>\${w.trending ? \`<span class="trend">▲ \${w.trending.toLocaleString()} adds</span>\` : ""}</span>
+    <span class="sc">\${w.proj != null ? "proj " + f1(w.proj) : ""}</span>
+    <span class="st"><a href="\${esc(w.lg.players_link)}" target="_blank" rel="noopener">View →</a></span></div>\`).join("");
+}
+
+function renderWaivers(d) {
+  $("waiverPanels").innerHTML = d.leagues.map((lg) => {
+    const faab = lg.faab
+      ? \`<span class="faab">FAAB $\${Math.round(lg.faab.budget - lg.faab.spent)} of $\${Math.round(lg.faab.budget)} left</span>\`
+      : "";
+    const rows = lg.waivers.slice(0, 16).map((w) => \`<tr>
+      <td class="p">\${esc(w.name)}\${w.trending ? \`<span class="trend">▲ \${w.trending.toLocaleString()}</span>\` : ""}</td>
+      <td><span class="posb \${esc(w.position.replace("/", ""))}">\${esc(w.position)}</span></td>
+      <td>\${esc(w.pro_team || "—")}</td>
+      <td class="num">\${w.proj != null ? f1(w.proj) : "—"}</td>
+      <td class="num">\${w.pct_owned != null ? w.pct_owned + "%" : "—"}</td>
+      <td>\${esc(w.note)}</td></tr>\`).join("");
+    const body = rows || \`<tr><td colspan="6" class="empty" style="white-space:normal">No candidates loaded yet — refreshes twice a day.</td></tr>\`;
+    return \`<div class="wpanel"><h3><span class="chip \${lg.platform}">\${platformLabel(lg.platform).toUpperCase()}</span>\${esc(lg.name)}\${faab}</h3>
+      <div class="tblwrap" style="border:none;border-radius:0"><table><thead><tr><th>Player</th><th>Pos</th><th>Team</th><th class="num">Proj</th><th class="num">%Ros</th><th>Status</th></tr></thead><tbody>\${body}</tbody></table></div>
+      <div class="plink"><a href="\${esc(lg.players_link)}" target="_blank" rel="noopener">Open player pool on \${platformLabel(lg.platform)} →</a></div></div>\`;
+  }).join("");
 }
 
 function renderHome(d) {
@@ -413,9 +482,9 @@ function render(d) {
     const up = m.my_score >= m.opp_score;
     return \`<span class="ti"><b>\${esc(tickerCode(lg.name))}</b><span class="\${up ? "up" : "down"}">\${f1(m.my_score)}\${up ? " ▲" : " ▼"}</span><span style="color:var(--faint)"> \${f1(m.opp_score)}</span></span>\`;
   }).join("");
-  renderHome(d);
+  renderHealth(d); renderHome(d); renderHomeWaivers(d);
   $("fronts").innerHTML = d.leagues.map(frontCard).join("");
-  renderForces(d); renderIntel(d); renderBriefs(d);
+  renderWaivers(d); renderForces(d); renderIntel(d); renderBriefs(d);
   const errs = d.sync_log.filter((s) => s.status !== "ok" && s.status !== "session-ok").length;
   $("log").innerHTML = d.sync_log.slice(0, 4).map((s) => \`<div>\${esc(s.at.slice(11, 19))}Z · \${esc(s.source)} · \${esc(s.status)}</div>\`).join("");
   lastFetch = Date.now();

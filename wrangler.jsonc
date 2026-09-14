@@ -5,8 +5,10 @@
   "compatibility_date": "2026-09-01",
   "compatibility_flags": ["nodejs_compat"],
   "observability": { "enabled": true, "head_sampling_rate": 1 },
-  // Sync every 5 minutes; advice regenerates with each sync.
-  "triggers": { "crons": ["*/5 * * * *"] },
+  // Fires every 2 minutes; the handler decides depth: full sync each tick
+  // during ET game windows (Thu/Mon eve, Sun afternoon+), every 10 min
+  // otherwise, waiver/trending refresh at 6:00 and 18:00 ET.
+  "triggers": { "crons": ["*/2 * * * *"] },
   // Non-secret vars only. League IDs, team IDs, cookies, and the dashboard
   // token are secrets (wrangler secret put / .dev.vars) — this file is public.
   "vars": {

@@ -43,6 +43,11 @@ export async function checkAuth(req: Request, env: Env): Promise<AuthResult> {
     return { kind: "set-cookie", response: new Response(null, { status: 302, headers }) };
   }
 
+  const bearer = (req.headers.get("Authorization") ?? "").replace(/^Bearer\s+/i, "");
+  if (bearer && (await tokenMatches(bearer, expected))) {
+    return { kind: "ok" };
+  }
+
   if (await tokenMatches(cookieValue(req), expected)) {
     return { kind: "ok" };
   }
