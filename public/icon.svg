@@ -1,14 +1,14 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-  <rect width="512" height="512" rx="96" fill="#0B1014"/>
-  <circle cx="256" cy="256" r="196" fill="none" stroke="#1E2B26" stroke-width="10"/>
-  <circle cx="256" cy="256" r="148" fill="none" stroke="#16352A" stroke-width="6"/>
-  <g stroke="#3FD08B" stroke-width="14" stroke-linecap="round">
+  <rect width="512" height="512" rx="96" fill="#191310"/>
+  <circle cx="256" cy="256" r="196" fill="none" stroke="#33281F" stroke-width="10"/>
+  <circle cx="256" cy="256" r="148" fill="none" stroke="#443627" stroke-width="6"/>
+  <g stroke="#D98E4A" stroke-width="14" stroke-linecap="round">
     <line x1="256" y1="34" x2="256" y2="78"/>
     <line x1="256" y1="434" x2="256" y2="478"/>
     <line x1="34" y1="256" x2="78" y2="256"/>
     <line x1="434" y1="256" x2="478" y2="256"/>
   </g>
-  <path d="M256 60 A196 196 0 0 1 452 256" fill="none" stroke="#3FD08B" stroke-width="12" stroke-linecap="round" opacity="0.9"/>
-  <text x="256" y="308" text-anchor="middle" font-family="Avenir Next Condensed, Arial Narrow, sans-serif" font-weight="800" font-size="188" fill="#3FD08B" letter-spacing="2">FF</text>
-  <text x="256" y="386" text-anchor="middle" font-family="Menlo, monospace" font-weight="700" font-size="40" fill="#7B8B83" letter-spacing="14">CTRL</text>
+  <path d="M256 60 A196 196 0 0 1 452 256" fill="none" stroke="#D98E4A" stroke-width="12" stroke-linecap="round" opacity="0.9"/>
+  <text x="256" y="308" text-anchor="middle" font-family="Avenir Next Condensed, Arial Narrow, sans-serif" font-weight="800" font-size="188" fill="#EFE7DC" letter-spacing="2">FF</text>
+  <text x="256" y="386" text-anchor="middle" font-family="Menlo, monospace" font-weight="700" font-size="40" fill="#B3A493" letter-spacing="14">CTRL</text>
 </svg>

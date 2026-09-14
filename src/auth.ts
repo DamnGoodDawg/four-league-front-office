@@ -51,13 +51,13 @@ export async function checkAuth(req: Request, env: Env): Promise<AuthResult> {
   // first launch may land here even for the owner — the form re-keys the room.
   const body = `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>FF Control Room</title>
-<body style="font-family:-apple-system,system-ui,sans-serif;background:#141A1E;color:#E9EDEA;display:grid;place-items:center;min-height:100vh;margin:0">
+<body style="font-family:-apple-system,system-ui,sans-serif;background:#191310;color:#EFE7DC;display:grid;place-items:center;min-height:100vh;margin:0">
 <div style="text-align:center;max-width:340px;padding:24px;font-family:-apple-system,system-ui">
-<h1 style="font:700 24px/1.2 -apple-system,system-ui;margin:0 0 8px;color:#E9EDEA">FF Control Room</h1>
-<p style="color:#9CA9A1;font-size:13.5px;line-height:1.6">This dashboard is private. Open the link from your text message, or enter your access code once — it's the part after <span style="font-family:ui-monospace,Menlo">t=</span> in that link.</p>
+<h1 style="font:700 24px/1.2 -apple-system,system-ui;margin:0 0 8px;color:#EFE7DC">FF Control Room</h1>
+<p style="color:#B3A493;font-size:13.5px;line-height:1.6">This dashboard is private. Open the link from your text message, or enter your access code once — it's the part after <span style="font-family:ui-monospace,Menlo">t=</span> in that link.</p>
 <form action="/" method="get" style="display:flex;gap:8px;margin-top:14px">
-<input name="t" placeholder="Access code" autocomplete="off" style="flex:1;background:#1A2226;border:1px solid #313D37;border-radius:8px;color:#E9EDEA;font:13px ui-monospace,Menlo,monospace;padding:10px 12px">
-<button style="background:#4CBE8D;border:0;border-radius:8px;color:#141A1E;font:600 13px -apple-system,system-ui;padding:0 18px;cursor:pointer">Unlock</button>
+<input name="t" placeholder="Access code" autocomplete="off" style="flex:1;background:#211A15;border:1px solid #443627;border-radius:8px;color:#EFE7DC;font:13px ui-monospace,Menlo,monospace;padding:10px 12px">
+<button style="background:#D98E4A;border:0;border-radius:8px;color:#191310;font:600 13px -apple-system,system-ui;padding:0 18px;cursor:pointer">Unlock</button>
 </form></div></body>`;
   return {
     kind: "denied",
