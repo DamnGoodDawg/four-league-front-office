@@ -32,8 +32,9 @@ function cadence(now: Date): { run: boolean; withWaivers: boolean } {
   const minute = Number(get("minute"));
   const inGameWindow =
     (day === "Sun" && hour >= 12) || ((day === "Thu" || day === "Mon") && hour >= 19);
-  const run = inGameWindow || minute % 10 === 0;
-  const withWaivers = minute % 10 === 0 && (hour === 6 || hour === 18);
+  const overnight = hour < 7; // 12am–7am ET: every 30 min is plenty
+  const run = inGameWindow || (overnight ? minute % 30 === 0 : minute % 10 === 0);
+  const withWaivers = minute % 10 === 0 && (hour === 7 || hour === 18);
   return { run, withWaivers };
 }
 

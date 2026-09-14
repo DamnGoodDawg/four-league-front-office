@@ -15,23 +15,52 @@ function chunk<T>(items: T[], size: number): T[][] {
   return out;
 }
 
-async function persistLeague(env: Env, data: NormalizedLeague, advice: AdviceItem[]): Promise<void> {
+const nearlyEqual = (a: number | null | undefined, b: number | null | undefined): boolean =>
+  (a == null && b == null) || (a != null && b != null && Math.abs(a - b) < 0.005);
+
+/**
+ * Diff-based persistence: D1's free tier meters rows WRITTEN (deletes and
+ * index updates included), so the old delete-and-reinsert of ~500 rows per
+ * sync burned the daily cap during game windows. This version reads current
+ * rows (reads are ~50x cheaper-budgeted) and writes only actual changes —
+ * a quiet tick writes ~0 rows; a live-game tick writes only players whose
+ * numbers moved. Returns the statement count for observability.
+ */
+async function persistLeague(env: Env, data: NormalizedLeague, advice: AdviceItem[]): Promise<number> {
   const { league, teams, matchups, rosters } = data;
   const stmts: D1PreparedStatement[] = [];
 
-  stmts.push(
-    env.DB.prepare(
-      `INSERT INTO leagues (id, platform, platform_league_id, name, season, my_team_id, current_week, deep_link, updated_at, faab_budget, faab_spent)
-       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
-       ON CONFLICT(id) DO UPDATE SET name = ?4, my_team_id = ?6, current_week = ?7, deep_link = ?8, updated_at = ?9, faab_budget = ?10, faab_spent = ?11`,
-    ).bind(
-      league.id, league.platform, league.platform_league_id, league.name, league.season,
-      league.my_team_id, league.current_week, league.deep_link, league.updated_at,
-      league.faab_budget, league.faab_spent,
-    ),
-  );
+  const curLeague = await env.DB.prepare(`SELECT * FROM leagues WHERE id = ?1`).bind(league.id).first<Record<string, unknown>>();
+  const leagueChanged =
+    !curLeague ||
+    curLeague.name !== league.name ||
+    curLeague.my_team_id !== league.my_team_id ||
+    curLeague.current_week !== league.current_week ||
+    curLeague.deep_link !== league.deep_link ||
+    !nearlyEqual(curLeague.faab_budget as number | null, league.faab_budget) ||
+    !nearlyEqual(curLeague.faab_spent as number | null, league.faab_spent);
+  if (leagueChanged) {
+    stmts.push(
+      env.DB.prepare(
+        `INSERT INTO leagues (id, platform, platform_league_id, name, season, my_team_id, current_week, deep_link, updated_at, faab_budget, faab_spent)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+         ON CONFLICT(id) DO UPDATE SET name = ?4, my_team_id = ?6, current_week = ?7, deep_link = ?8, updated_at = ?9, faab_budget = ?10, faab_spent = ?11`,
+      ).bind(
+        league.id, league.platform, league.platform_league_id, league.name, league.season,
+        league.my_team_id, league.current_week, league.deep_link, league.updated_at,
+        league.faab_budget, league.faab_spent,
+      ),
+    );
+  }
 
+  const curTeams = new Map(
+    (await env.DB.prepare(`SELECT * FROM teams WHERE league_id = ?1`).bind(league.id).all<Record<string, unknown>>())
+      .results.map((t) => [t.team_id as string, t]),
+  );
   for (const t of teams) {
+    const c = curTeams.get(t.team_id);
+    if (c && c.name === t.name && c.wins === t.wins && c.losses === t.losses && c.ties === t.ties &&
+        nearlyEqual(c.points_for as number, t.points_for) && c.is_mine === t.is_mine) continue;
     stmts.push(
       env.DB.prepare(
         `INSERT INTO teams (league_id, team_id, name, wins, losses, ties, points_for, is_mine)
@@ -41,18 +70,51 @@ async function persistLeague(env: Env, data: NormalizedLeague, advice: AdviceIte
     );
   }
 
-  stmts.push(env.DB.prepare(`DELETE FROM matchups WHERE league_id = ?1 AND week = ?2`).bind(league.id, league.current_week));
+  const curMatchups = new Map(
+    (await env.DB.prepare(`SELECT * FROM matchups WHERE league_id = ?1 AND week = ?2`)
+      .bind(league.id, league.current_week).all<Record<string, unknown>>())
+      .results.map((m) => [m.matchup_id as string, m]),
+  );
+  const newMatchupIds = new Set(matchups.map((m) => m.matchup_id));
+  for (const [mid] of curMatchups) {
+    if (!newMatchupIds.has(mid)) {
+      stmts.push(env.DB.prepare(`DELETE FROM matchups WHERE league_id = ?1 AND week = ?2 AND matchup_id = ?3`)
+        .bind(league.id, league.current_week, mid));
+    }
+  }
   for (const m of matchups) {
+    const c = curMatchups.get(m.matchup_id);
+    if (c && c.home_team_id === m.home_team_id && c.away_team_id === m.away_team_id &&
+        nearlyEqual(c.home_score as number, m.home_score) && nearlyEqual(c.away_score as number, m.away_score) &&
+        nearlyEqual(c.home_proj as number, m.home_proj) && nearlyEqual(c.away_proj as number, m.away_proj) &&
+        nearlyEqual(c.home_win_prob as number | null, m.home_win_prob)) continue;
     stmts.push(
       env.DB.prepare(
         `INSERT INTO matchups (league_id, week, matchup_id, home_team_id, away_team_id, home_score, away_score, home_proj, away_proj, home_win_prob)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)`,
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+         ON CONFLICT(league_id, week, matchup_id) DO UPDATE SET home_team_id = ?4, away_team_id = ?5,
+           home_score = ?6, away_score = ?7, home_proj = ?8, away_proj = ?9, home_win_prob = ?10`,
       ).bind(m.league_id, m.week, m.matchup_id, m.home_team_id, m.away_team_id, m.home_score, m.away_score, m.home_proj, m.away_proj, m.home_win_prob),
     );
   }
 
-  stmts.push(env.DB.prepare(`DELETE FROM roster_slots WHERE league_id = ?1 AND week = ?2`).bind(league.id, league.current_week));
+  const curRosters = new Map(
+    (await env.DB.prepare(`SELECT * FROM roster_slots WHERE league_id = ?1 AND week = ?2`)
+      .bind(league.id, league.current_week).all<Record<string, unknown>>())
+      .results.map((r) => [`${r.team_id}|${r.player_id}`, r]),
+  );
+  const newRosterKeys = new Set(rosters.map((r) => `${r.team_id}|${r.player_id}`));
+  for (const [key, c] of curRosters) {
+    if (!newRosterKeys.has(key)) {
+      stmts.push(env.DB.prepare(`DELETE FROM roster_slots WHERE league_id = ?1 AND week = ?2 AND team_id = ?3 AND player_id = ?4`)
+        .bind(league.id, league.current_week, c.team_id, c.player_id));
+    }
+  }
   for (const r of rosters) {
+    const c = curRosters.get(`${r.team_id}|${r.player_id}`);
+    if (c && c.player_name === r.player_name && c.position === r.position && c.slot === r.slot &&
+        c.is_starter === r.is_starter && c.injury_status === r.injury_status &&
+        nearlyEqual(c.proj_points as number, r.proj_points) && nearlyEqual(c.actual_points as number, r.actual_points)) continue;
     stmts.push(
       env.DB.prepare(
         `INSERT INTO roster_slots (league_id, team_id, week, player_id, player_name, position, slot, is_starter, injury_status, proj_points, actual_points)
@@ -63,26 +125,41 @@ async function persistLeague(env: Env, data: NormalizedLeague, advice: AdviceIte
     );
   }
 
-  stmts.push(
-    env.DB.prepare(`DELETE FROM advice WHERE league_id = ?1 AND week = ?2 AND source = 'rules'`)
-      .bind(league.id, league.current_week),
-  );
-  const now = new Date().toISOString();
-  for (const a of advice) {
+  // Rules-lane advice: rewrite only when the generated set actually differs.
+  const curAdvice = (
+    await env.DB.prepare(
+      `SELECT type, severity, message FROM advice WHERE league_id = ?1 AND week = ?2 AND source = 'rules' ORDER BY id`,
+    ).bind(league.id, league.current_week).all<{ type: string; severity: string; message: string }>()
+  ).results;
+  const serialize = (list: Array<{ type: string; severity: string; message: string }>) =>
+    JSON.stringify(list.map((a) => [a.type, a.severity, a.message]));
+  if (serialize(curAdvice) !== serialize(advice)) {
     stmts.push(
-      env.DB.prepare(
-        `INSERT INTO advice (league_id, team_id, week, type, severity, message, deep_link, created_at, source)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'rules')`,
-      ).bind(a.league_id, a.team_id, a.week, a.type, a.severity, a.message, a.deep_link, now),
+      env.DB.prepare(`DELETE FROM advice WHERE league_id = ?1 AND week = ?2 AND source = 'rules'`)
+        .bind(league.id, league.current_week),
     );
+    const now = new Date().toISOString();
+    for (const a of advice) {
+      stmts.push(
+        env.DB.prepare(
+          `INSERT INTO advice (league_id, team_id, week, type, severity, message, deep_link, created_at, source)
+           VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'rules')`,
+        ).bind(a.league_id, a.team_id, a.week, a.type, a.severity, a.message, a.deep_link, now),
+      );
+    }
   }
 
   for (const group of chunk(stmts, 50)) {
     await env.DB.batch(group);
   }
+  return stmts.length;
 }
 
+/** Log only status CHANGES (plus first sighting) — a steady "ok" every 2 minutes is cap burn, not information. */
 async function logSync(env: Env, source: string, status: string, detail: string): Promise<void> {
+  const prev = await env.DB.prepare(`SELECT status FROM sync_log WHERE source = ?1 ORDER BY id DESC LIMIT 1`)
+    .bind(source).first<{ status: string }>();
+  if (prev?.status === status) return;
   await env.DB.prepare(`INSERT INTO sync_log (source, status, detail, at) VALUES (?1, ?2, ?3, ?4)`)
     .bind(source, status, detail.slice(0, 500), new Date().toISOString())
     .run();
@@ -174,8 +251,8 @@ export async function runSync(env: Env, opts: { withWaivers?: boolean } = {}): P
         swid: env.ESPN_SWID ?? "",
       });
       const advice = generateAdvice(data.league, data.rosters);
-      await persistLeague(env, data, advice);
-      const detail = `"${data.league.name}" week ${data.league.current_week}: ${data.teams.length} teams, ${data.rosters.length} roster slots, ${advice.length} advice`;
+      const wrote = await persistLeague(env, data, advice);
+      const detail = `"${data.league.name}" week ${data.league.current_week}: ${data.teams.length} teams, ${data.rosters.length} roster slots, ${advice.length} advice, wrote ${wrote}`;
       results.push({ source, status: "ok", detail });
       await logSync(env, source, "ok", detail);
     } catch (err) {
@@ -189,7 +266,8 @@ export async function runSync(env: Env, opts: { withWaivers?: boolean } = {}): P
   if (yahoo.status === "ok" && yahoo.data) {
     try {
       const advice = generateAdvice(yahoo.data.league, yahoo.data.rosters);
-      await persistLeague(env, yahoo.data, advice);
+      const wrote = await persistLeague(env, yahoo.data, advice);
+      yahoo.detail += `, wrote ${wrote}`;
     } catch (err) {
       yahoo.status = "error";
       yahoo.detail = `persist failed: ${err instanceof Error ? err.message : String(err)}`;
