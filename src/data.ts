@@ -25,6 +25,8 @@ export interface LeagueView {
     opp_proj: number;
     opp_name: string;
     opp_record: string;
+    /** My side's live win probability, 0..100 (ESPN native; Yahoo computed). */
+    win_pct: number | null;
     /** Starters with 0.0 actual so far (heuristic for "yet to fire"). */
     my_zero: number;
     /** null when we don't sync that opponent's roster (Yahoo, until Phase 2). */
@@ -108,6 +110,9 @@ export async function buildData(env: Env): Promise<DataPayload> {
         opp_proj: iAmHome ? matchup.away_proj : matchup.home_proj,
         opp_name: opp?.name ?? "Bye",
         opp_record: opp ? `${opp.wins}-${opp.losses}${opp.ties ? `-${opp.ties}` : ""}` : "",
+        win_pct: matchup.home_win_prob == null
+          ? null
+          : Math.round((iAmHome ? matchup.home_win_prob : 1 - matchup.home_win_prob) * 100),
         my_zero: (await zeroStarterCount(env, lg.id, lg.my_team_id, lg.current_week)) ?? 0,
         opp_zero: oppId ? await zeroStarterCount(env, lg.id, oppId, lg.current_week) : null,
       };
@@ -165,7 +170,9 @@ export async function buildData(env: Env): Promise<DataPayload> {
       roster,
       opp_roster: oppRoster,
       standings,
-      faab: lg.faab_budget != null ? { budget: lg.faab_budget, spent: lg.faab_spent ?? 0 } : null,
+      // Taylor: all four leagues run standard waivers — no FAAB/auction anywhere,
+      // whatever ESPN's default settings claim. Never surface budgets or suggest bids.
+      faab: null,
       waivers,
       players_link: playersLink,
     });

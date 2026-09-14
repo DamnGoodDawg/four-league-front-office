@@ -35,6 +35,7 @@ export interface MatchupRow {
   away_score: number;
   home_proj: number;
   away_proj: number;
+  home_win_prob: number | null;
 }
 
 export interface RosterSlotRow {

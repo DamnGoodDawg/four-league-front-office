@@ -45,9 +45,9 @@ async function persistLeague(env: Env, data: NormalizedLeague, advice: AdviceIte
   for (const m of matchups) {
     stmts.push(
       env.DB.prepare(
-        `INSERT INTO matchups (league_id, week, matchup_id, home_team_id, away_team_id, home_score, away_score, home_proj, away_proj)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)`,
-      ).bind(m.league_id, m.week, m.matchup_id, m.home_team_id, m.away_team_id, m.home_score, m.away_score, m.home_proj, m.away_proj),
+        `INSERT INTO matchups (league_id, week, matchup_id, home_team_id, away_team_id, home_score, away_score, home_proj, away_proj, home_win_prob)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)`,
+      ).bind(m.league_id, m.week, m.matchup_id, m.home_team_id, m.away_team_id, m.home_score, m.away_score, m.home_proj, m.away_proj, m.home_win_prob),
     );
   }
 

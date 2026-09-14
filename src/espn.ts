@@ -48,6 +48,8 @@ interface EspnMatchupSide {
   teamId?: number;
   totalPoints?: number;
   totalPointsLive?: number;
+  totalProjectedPointsLive?: number;
+  winProbability?: number;
 }
 
 interface EspnScheduleItem {
@@ -183,8 +185,10 @@ export async function fetchEspnLeague(args: EspnLeagueArgs): Promise<NormalizedL
   const leagueId = `espn:${args.leagueId}`;
   const now = new Date().toISOString();
 
+  // ESPN reports a default $100 budget even for standard-waiver leagues; only
+  // treat it as FAAB when the league explicitly uses acquisition bidding.
   const acq = data.settings?.acquisitionSettings;
-  const usesFaab = acq?.isUsingAcquisitionBudget !== false && (acq?.acquisitionBudget ?? 0) > 0;
+  const usesFaab = acq?.isUsingAcquisitionBudget === true && (acq?.acquisitionBudget ?? 0) > 0;
   const myTeamRaw = (data.teams ?? []).find((t) => String(t.id) === args.myTeamId);
   const league: LeagueRow = {
     id: leagueId,
@@ -258,8 +262,10 @@ export async function fetchEspnLeague(args: EspnLeagueArgs): Promise<NormalizedL
         away_team_id: awayId,
         home_score: m.home?.totalPointsLive ?? m.home?.totalPoints ?? 0,
         away_score: m.away?.totalPointsLive ?? m.away?.totalPoints ?? 0,
-        home_proj: homeId ? (projByTeam.get(homeId) ?? 0) : 0,
-        away_proj: awayId ? (projByTeam.get(awayId) ?? 0) : 0,
+        // Prefer ESPN's live re-projection; fall back to summed pre-game proj.
+        home_proj: m.home?.totalProjectedPointsLive ?? (homeId ? (projByTeam.get(homeId) ?? 0) : 0),
+        away_proj: m.away?.totalProjectedPointsLive ?? (awayId ? (projByTeam.get(awayId) ?? 0) : 0),
+        home_win_prob: typeof m.home?.winProbability === "number" ? m.home.winProbability : null,
       };
     });
 

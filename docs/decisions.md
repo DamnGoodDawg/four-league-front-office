@@ -52,3 +52,12 @@ Any digest/analysis reads like a sports article INSIDE the app (Briefings sectio
 
 ## D13 — LLM runtime: Claude CLI scheduled on the Mac (2026-09-13, Taylor)
 Use the house pattern — other projects on this Mac already schedule Claude CLI runs successfully (see their launchd/scheduling scaffolding, e.g. the Tempest setup, before building new). Jobs read the Worker's analysis bundle, write briefings/advice back via authenticated endpoint, ping via DD per D12.
+
+## D14 — Win probability on every matchup (2026-09-13, Taylor)
+ESPN provides it natively (`side.winProbability`, plus `totalProjectedPointsLive` used as the live projection). Yahoo has no public one: computed as a damped logistic over (live score + remaining projected points) for both rosters — sigma grows with remaining variance so early games hover near 50% (the Sleeper lesson). Shown on matchup cards ("· 62% to win"), Home mini-rows, and the card bar fill.
+
+## D15 — No FAAB anywhere (2026-09-13, Taylor)
+All four leagues run standard waiver priority. ESPN's settings claim $100 budgets on two leagues — Taylor overrules the flag: FAAB is never surfaced and analysis never suggests bid amounts; claims are framed as priority spends.
+
+## D16 — Phase 3 runtime: desktop scheduled tasks; syncs never touch a model (2026-09-13)
+The 2-minute refreshes are pure processes (HTTP + SQL on Cloudflare) — zero LLM involvement, zero model cost. LLM analysis runs only as three scheduled desktop tasks (the house pattern already used by sprinkler/Tempest checks), on the Claude subscription: ffcr-waiver-briefing (Tue 7am), ffcr-daily-lineup-check (daily 8am, silent unless actionable), ffcr-sunday-pre-lock (Sun 11:30am, always one text). Job instructions versioned in jobs/*.md; tasks run while the desktop app is open (else on next launch). Model follows the app's configured default — set it to the preferred cost tier there.

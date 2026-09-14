@@ -364,10 +364,13 @@ function renderHome(d) {
     const m = lg.matchup;
     const up = m.my_score >= m.opp_score;
     const diff = Math.abs(m.my_score - m.opp_score);
+    const st = m.win_pct != null
+      ? \`<span class="st \${m.win_pct >= 50 ? "lead-up" : "lead-down"}">\${m.win_pct}% win</span>\`
+      : \`<span class="st \${up ? "lead-up" : "lead-down"}">\${up ? "Up" : "Down"} \${f1(diff)}</span>\`;
     return \`<div class="mini"><span class="lgc">\${esc(tickerCode(lg.name))}</span>
       <span class="who"><b>\${esc(lg.my_team?.name ?? "Me")}</b> <span>vs \${esc(m.opp_name)}</span></span>
       <span class="sc">\${f1(m.my_score)} <small>— \${f1(m.opp_score)}</small></span>
-      <span class="st \${up ? "lead-up" : "lead-down"}">\${up ? "Up" : "Down"} \${f1(diff)}</span></div>\`;
+      \${st}</div>\`;
   }).join("") || '<div class="empty">No live matchups.</div>';
 
   const b = d.briefings[0];
@@ -383,9 +386,13 @@ function frontCard(lg) {
   const rec = me ? \`\${me.wins}-\${me.losses}\${me.ties ? "-" + me.ties : ""}\` : "";
   if (!m) return \`<div class="front"><div class="fhead"><span class="chip \${lg.platform}">\${platformLabel(lg.platform).toUpperCase()}</span>\${esc(lg.name)}</div><div class="empty">No matchup this week.</div></div>\`;
   const total = m.my_score + m.opp_score;
-  const share = total > 0 ? (m.my_score / total) * 100 : (m.my_proj + m.opp_proj > 0 ? (m.my_proj / (m.my_proj + m.opp_proj)) * 100 : 50);
+  const share = m.win_pct != null ? m.win_pct
+    : total > 0 ? (m.my_score / total) * 100
+    : (m.my_proj + m.opp_proj > 0 ? (m.my_proj / (m.my_proj + m.opp_proj)) * 100 : 50);
   const diff = m.my_score - m.opp_score;
-  const lead = diff >= 0 ? \`<span class="lead-up">Up \${f1(diff)}</span>\` : \`<span class="lead-down">Down \${f1(-diff)}</span>\`;
+  const odds = m.win_pct != null
+    ? \` <span class="\${m.win_pct >= 50 ? "lead-up" : "lead-down"}">· \${m.win_pct}% to win</span>\` : "";
+  const lead = (diff >= 0 ? \`<span class="lead-up">Up \${f1(diff)}</span>\` : \`<span class="lead-down">Down \${f1(-diff)}</span>\`) + odds;
   const left = \`Yet to play: \${m.my_zero} vs \${m.opp_zero == null ? "—" : m.opp_zero}\`;
   return \`<div class="front">
     <div class="fhead"><span class="chip \${lg.platform}">\${platformLabel(lg.platform).toUpperCase()}</span><span style="overflow:hidden;text-overflow:ellipsis">\${esc(lg.name)}</span><span style="margin-left:auto">Week \${lg.week}</span></div>

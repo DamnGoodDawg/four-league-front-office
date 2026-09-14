@@ -239,11 +239,26 @@ export async function fetchYahooLeague(env: Env): Promise<YahooResult> {
         }
       } catch { /* opponent roster is nice-to-have; never fail the sync for it */ }
     }
+    // Yahoo has no public win probability — compute a damped estimate from
+    // live score + remaining projected points on both sides (needs opp roster).
+    const remainingFor = (teamId: string): number =>
+      rosters2.filter((r) => r.team_id === teamId && r.is_starter === 1 && r.actual_points === 0)
+        .reduce((s, r) => s + r.proj_points, 0);
+    let winProb: number | null = null;
+    if (rosters2.some((r) => r.team_id === oppTeam)) {
+      const remMe = remainingFor(myTeam);
+      const remOpp = remainingFor(oppTeam);
+      const sigma = 3 + 0.35 * Math.sqrt(remMe * remMe + remOpp * remOpp);
+      const p = 1 / (1 + Math.exp(-((myScore + remMe) - (oppScore + remOpp)) / sigma));
+      winProb = Math.min(0.99, Math.max(0.01, p));
+    }
+
     const matchups: MatchupRow[] = [
       {
         league_id: id, week, matchup_id: `${myTeam}-${oppTeam}`,
         home_team_id: myTeam, away_team_id: oppTeam,
         home_score: myScore, away_score: oppScore, home_proj: myProj, away_proj: oppProj,
+        home_win_prob: winProb,
       },
     ];
 
