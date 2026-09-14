@@ -1,4 +1,5 @@
 import type { AdviceItem, LeagueRow, MatchupRow, RosterSlotRow, TeamRow } from "./model";
+import { writeHealth } from "./sync";
 import { yahooLeagueLink } from "./yahoo";
 
 export interface StandingRow {
@@ -190,6 +191,14 @@ export async function buildData(env: Env): Promise<DataPayload> {
        WHERE id IN (SELECT MAX(id) FROM sync_log GROUP BY source) ORDER BY source`,
     ).all<DataPayload["health"][number]>()
   ).results;
+  if (writeHealth.blocked) {
+    health.unshift({
+      source: "d1-writes",
+      status: "blocked",
+      detail: "Cloudflare's daily database write cap is hit — score updates are paused until the reset (8:00 PM ET). Showing the last synced data.",
+      at: writeHealth.at,
+    });
+  }
 
   const briefings = (
     await env.DB.prepare(

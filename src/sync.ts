@@ -149,20 +149,43 @@ async function persistLeague(env: Env, data: NormalizedLeague, advice: AdviceIte
     }
   }
 
-  for (const group of chunk(stmts, 50)) {
-    await env.DB.batch(group);
+  try {
+    for (const group of chunk(stmts, 50)) {
+      await env.DB.batch(group);
+    }
+  } catch (err) {
+    noteWriteFailure(err);
+    throw err;
   }
+  if (stmts.length) writeHealth.blocked = false;
   return stmts.length;
 }
 
-/** Log only status CHANGES (plus first sighting) — a steady "ok" every 2 minutes is cap burn, not information. */
+/**
+ * Isolate-local write-block signal: when D1 rejects writes (e.g. the account's
+ * daily cap), surface it to the dashboard WITHOUT needing a DB write. Best
+ * effort — isolates vary — but it beats claiming freshness during a block.
+ */
+export const writeHealth = { blocked: false, detail: "", at: "" };
+function noteWriteFailure(err: unknown): void {
+  writeHealth.blocked = true;
+  writeHealth.detail = err instanceof Error ? err.message.slice(0, 200) : String(err).slice(0, 200);
+  writeHealth.at = new Date().toISOString();
+}
+
+/** Log only status CHANGES (plus first sighting) — a steady "ok" every 2 minutes is cap burn, not information. Never throws. */
 async function logSync(env: Env, source: string, status: string, detail: string): Promise<void> {
-  const prev = await env.DB.prepare(`SELECT status FROM sync_log WHERE source = ?1 ORDER BY id DESC LIMIT 1`)
-    .bind(source).first<{ status: string }>();
-  if (prev?.status === status) return;
-  await env.DB.prepare(`INSERT INTO sync_log (source, status, detail, at) VALUES (?1, ?2, ?3, ?4)`)
-    .bind(source, status, detail.slice(0, 500), new Date().toISOString())
-    .run();
+  try {
+    const prev = await env.DB.prepare(`SELECT status FROM sync_log WHERE source = ?1 ORDER BY id DESC LIMIT 1`)
+      .bind(source).first<{ status: string }>();
+    if (prev?.status === status) return;
+    await env.DB.prepare(`INSERT INTO sync_log (source, status, detail, at) VALUES (?1, ?2, ?3, ?4)`)
+      .bind(source, status, detail.slice(0, 500), new Date().toISOString())
+      .run();
+    writeHealth.blocked = false;
+  } catch (err) {
+    noteWriteFailure(err);
+  }
 }
 
 /** Waiver-wire + trending data is heavier and slower-moving: refresh at most every 6h (or when forced). */
@@ -173,6 +196,15 @@ export async function waiverDataIsStale(env: Env): Promise<boolean> {
 }
 
 export async function refreshWaiverData(env: Env): Promise<Array<{ source: string; status: string; detail: string }>> {
+  // Canary: a zero-row write costs nothing when healthy, but fails fast when
+  // the account's D1 write cap is exhausted — skip the heavy fetches entirely.
+  try {
+    await env.DB.prepare(`UPDATE trending SET fetched_at = fetched_at WHERE 1 = 0`).run();
+  } catch (err) {
+    noteWriteFailure(err);
+    return [{ source: "waivers", status: "blocked", detail: "D1 daily write cap hit — waiver refresh paused until the reset." }];
+  }
+
   const results: Array<{ source: string; status: string; detail: string }> = [];
   const now = new Date().toISOString();
   const leagueIds = (env.ESPN_LEAGUE_IDS ?? "").split(",").map((s) => s.trim()).filter(Boolean);
