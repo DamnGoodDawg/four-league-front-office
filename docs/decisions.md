@@ -32,3 +32,14 @@ Application submitted and acknowledged (Yahoo quotes 1–2 weeks review). Direct
 
 ## D9 — Connectivity before app experience (2026-09-13, Taylor)
 Build order: all four data pipes proven in production before investing in the dashboard experience. Status at time of writing: ESPN ×3 live on Cloudflare (15-min cron, D1, token-gated API), thin UI shell frozen, Yahoo pipe awaiting session cookie + league id.
+
+## D10 — Yahoo read = permanent cookie-scrape, not an API stopgap (2026-09-13, Taylor's steer, SUPERSEDES the framing in D8)
+Taylor's correction: assume the official API never arrives for an individual ("Yahoo offers it to apps, not randoms"). Punting player-level Yahoo data to that API broke the core goal (manage my team from one app). So the cookie-read of Yahoo's classic web pages is the **permanent read architecture**, and it now has full parity with ESPN: league, matchup, and the complete roster (starters + bench) with per-player projected/actual points and injury status, feeding the same advice engine.
+
+Robustness (this is what makes scraping acceptable as permanent, not fragile):
+- Parsed with a real HTML parser (`node-html-parser`), not regex — handles Yahoo's nested tables. Slot anchored on `span[data-pos]`; leading columns (slot, player, bye[3], Fan Pts/actual[4], Proj Pts[5]) are stable across all position tables.
+- **Self-validating**: each sync sums starters' actual points and compares to Yahoo's own week-score value; the sync detail shows both so drift is visible. Matched to the decimal (181.7 vs 181.73) at build time.
+- **Graceful degradation**: if Yahoo reshapes the markup, roster parse returns 0, the sync detail flags "⚠ roster parse returned 0", and the matchup headline still works — never silent stale data.
+- Cookie expiry surfaces as status "session-expired" with a re-grab prompt.
+
+If the API is ever approved, it swaps in behind `fetchYahooLeague`'s NormalizedLeague return with no other changes — a bonus, not a dependency. Yahoo write-back (future phase) will be browser-automation regardless, since the Yahoo API never offered writes to anyone.

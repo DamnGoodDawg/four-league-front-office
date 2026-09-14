@@ -1,12 +1,34 @@
-import type { LeagueRow, MatchupRow, NormalizedLeague, TeamRow } from "./model";
+import { parse } from "node-html-parser";
+import type { LeagueRow, MatchupRow, NormalizedLeague, RosterSlotRow, TeamRow } from "./model";
 
 /**
- * Interim Yahoo source: reads the logged-in classic web pages with the user's
- * session cookie (YAHOO_COOKIE) while the official OAuth API application is under
- * review. Swappable — a `yahoo-api` implementation replaces this behind the same
- * NormalizedLeague return type once approved. Scope for now: league + my matchup
- * headline (scores, projections, opponent). Per-player rosters land with the API.
+ * Yahoo source (no official API). Reads the logged-in classic web pages with the
+ * user's session cookie (YAHOO_COOKIE) — Yahoo does not grant the read/write API
+ * to individuals, so this cookie-read IS the permanent read path, not a stopgap.
+ * Returns the same NormalizedLeague shape as ESPN: league, teams, matchup, and
+ * the full roster (starters + bench) with per-player projected/actual points and
+ * injury status — so the dashboard and advice engine treat Yahoo identically.
+ *
+ * The roster is parsed with a real HTML parser (node-html-parser), not regex, so
+ * Yahoo's nested tables are handled correctly. If Yahoo ever reshapes the classic
+ * markup, `parseRoster` degrades to an empty roster (matchup headline still works)
+ * and the sync detail flags the drop — it never silently shows stale data.
  */
+
+/** Yahoo injury abbreviations -> the vocabulary generateAdvice() expects. */
+const STATUS_MAP: Record<string, string> = {
+  O: "OUT", OUT: "OUT", D: "DOUBTFUL", Q: "QUESTIONABLE", GTD: "QUESTIONABLE",
+  DTD: "QUESTIONABLE", IR: "INJURY_RESERVE", "IR-R": "INJURY_RESERVE",
+  SUS: "SUSPENSION", SUSP: "SUSPENSION", PUP: "OUT", NFI: "OUT", NA: "OUT",
+};
+const INJURY_TOKENS = new Set(Object.keys(STATUS_MAP));
+
+/** Yahoo roster slot labels -> our slot vocabulary. */
+const SLOT_MAP: Record<string, string> = {
+  QB: "QB", RB: "RB", WR: "WR", TE: "TE", "W/R/T": "FLEX", "W/R": "RB/WR",
+  "Q/W/R/T": "OP", K: "K", DEF: "D/ST", "D/ST": "D/ST", BN: "Bench", IR: "IR",
+};
+const NON_STARTING = new Set(["Bench", "IR"]);
 
 const UA =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36";
@@ -73,6 +95,68 @@ function discoverMyTeam(homeHtml: string, leagueId: string, override?: string): 
   return alt ? alt[1] : null;
 }
 
+function cellText(el: { text?: string } | null | undefined): string {
+  return (el?.text ?? "").replace(/\s+/g, " ").trim();
+}
+
+/**
+ * Parse the full roster from a team page. Anchors on each row's slot cell
+ * (the one carrying data-pos), which every roster row has exactly one of, then
+ * reads the stable leading columns: [0] slot, player-name anchor, [3] bye,
+ * [4] Fan Pts (actual), [5] Proj Pts. Columns after those differ per position
+ * group, but these six are consistent across all stat tables.
+ */
+function parseRoster(html: string, leagueId: string, teamId: string, week: number): RosterSlotRow[] {
+  const root = parse(html);
+  const out: RosterSlotRow[] = [];
+  const seen = new Set<string>();
+
+  for (const slotEl of root.querySelectorAll("span[data-pos]")) {
+    const rawSlot = slotEl.getAttribute("data-pos") ?? "";
+    const row = slotEl.closest("tr");
+    if (!row) continue;
+    const anchor = row.querySelector("a[data-ys-playerid]");
+    const cells = row.querySelectorAll("td");
+    if (cells.length < 6) continue; // header / spacer rows
+
+    const slot = SLOT_MAP[rawSlot] ?? rawSlot;
+    const isStarter = NON_STARTING.has(slot) ? 0 : 1;
+
+    let playerId = anchor?.getAttribute("data-ys-playerid") ?? "";
+    let name = cellText(anchor) || "Empty slot";
+    if (!playerId) { name = "Empty slot"; playerId = `empty-${rawSlot}-${out.length}`; }
+    if (seen.has(playerId)) continue;
+    seen.add(playerId);
+
+    const nameCellText = cellText(cells[2]);
+    const posMatch = nameCellText.match(/\s-\s([A-Z/]{1,4})\b/); // "Chi - QB"
+    const position = posMatch ? posMatch[1] : (slot === "D/ST" ? "D/ST" : rawSlot);
+
+    // Injury token sits in the name cell after the player link.
+    let status = "";
+    for (const tag of cells[2]?.querySelectorAll("span, abbr, em") ?? []) {
+      const tok = cellText(tag).toUpperCase();
+      if (INJURY_TOKENS.has(tok)) { status = STATUS_MAP[tok]; break; }
+    }
+
+    const num = (s: string): number => { const m = s.match(/-?\d+(?:\.\d+)?/); return m ? parseFloat(m[0]) : 0; };
+    out.push({
+      league_id: `yahoo:${leagueId}`,
+      team_id: teamId,
+      week,
+      player_id: playerId,
+      player_name: name,
+      position,
+      slot,
+      is_starter: isStarter,
+      injury_status: status,
+      proj_points: num(cellText(cells[5])),
+      actual_points: num(cellText(cells[4])),
+    });
+  }
+  return out;
+}
+
 export async function fetchYahooLeague(env: Env): Promise<YahooResult> {
   const cookie = env.YAHOO_COOKIE ?? "";
   const leagueId = env.YAHOO_LEAGUE_ID ?? "";
@@ -119,6 +203,13 @@ export async function fetchYahooLeague(env: Env): Promise<YahooResult> {
     const myRecord = html.match(/Fw-b Fz-xxl">\s*(\d+)-(\d+)-(\d+)\s*</);
     const [, w = "0", l = "0", t = "0"] = myRecord ?? [];
 
+    const rosters = parseRoster(html, leagueId, myTeam, week);
+    const starterSum = rosters.filter((r) => r.is_starter).reduce((s, r) => s + r.actual_points, 0);
+    const rosterNote =
+      rosters.length === 0
+        ? " — ⚠ roster parse returned 0 players (Yahoo markup may have changed)"
+        : ` — ${rosters.length} players parsed (starters sum ${starterSum.toFixed(1)} vs card ${myScore})`;
+
     const id = `yahoo:${leagueId}`;
     const now = new Date().toISOString();
 
@@ -141,8 +232,8 @@ export async function fetchYahooLeague(env: Env): Promise<YahooResult> {
 
     return {
       status: "ok",
-      detail: `"${leagueName}" week ${week}: ${myName} ${myScore} vs ${oppName} ${oppScore} (roster detail pending API)`,
-      data: { league, teams, matchups, rosters: [] },
+      detail: `"${leagueName}" week ${week}: ${myName} ${myScore} vs ${oppName} ${oppScore}${rosterNote}`,
+      data: { league, teams, matchups, rosters },
     };
   } catch (err) {
     return { status: "error", detail: err instanceof Error ? err.message : String(err) };

@@ -5,8 +5,8 @@
   "compatibility_date": "2026-09-01",
   "compatibility_flags": ["nodejs_compat"],
   "observability": { "enabled": true, "head_sampling_rate": 1 },
-  // Sync every 15 minutes; advice regenerates with each sync.
-  "triggers": { "crons": ["*/15 * * * *"] },
+  // Sync every 5 minutes; advice regenerates with each sync.
+  "triggers": { "crons": ["*/5 * * * *"] },
   // Non-secret vars only. League IDs, team IDs, cookies, and the dashboard
   // token are secrets (wrangler secret put / .dev.vars) — this file is public.
   "vars": {
