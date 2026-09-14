@@ -51,14 +51,13 @@ export async function checkAuth(req: Request, env: Env): Promise<AuthResult> {
   // first launch may land here even for the owner — the form re-keys the room.
   const body = `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>FF Control Room</title>
-<body style="font-family:ui-monospace,Menlo,monospace;background:#0B1014;color:#C8D2CC;display:grid;place-items:center;min-height:100vh;margin:0">
-<div style="text-align:center;max-width:340px;padding:24px">
-<div style="font-size:11px;letter-spacing:.35em;color:#3FD08B;border:1px solid #1E2B26;padding:6px 10px;display:inline-block">RESTRICTED AREA</div>
-<h1 style="font:800 26px/1.2 -apple-system,system-ui;letter-spacing:.04em;margin:18px 0 6px;color:#E9EFEA">FF CONTROL ROOM</h1>
-<p style="color:#7B8B83;font-size:12.5px;line-height:1.6">Authorization required. Open your tokened link, or enter the access token once.</p>
+<body style="font-family:-apple-system,system-ui,sans-serif;background:#141A1E;color:#E9EDEA;display:grid;place-items:center;min-height:100vh;margin:0">
+<div style="text-align:center;max-width:340px;padding:24px;font-family:-apple-system,system-ui">
+<h1 style="font:700 24px/1.2 -apple-system,system-ui;margin:0 0 8px;color:#E9EDEA">FF Control Room</h1>
+<p style="color:#9CA9A1;font-size:13.5px;line-height:1.6">This dashboard is private. Open the link from your text message, or enter your access code once — it's the part after <span style="font-family:ui-monospace,Menlo">t=</span> in that link.</p>
 <form action="/" method="get" style="display:flex;gap:8px;margin-top:14px">
-<input name="t" placeholder="access token" autocomplete="off" style="flex:1;background:#10171C;border:1px solid #23302A;border-radius:6px;color:#C8D2CC;font:13px ui-monospace,Menlo,monospace;padding:10px 12px">
-<button style="background:#3FD08B;border:0;border-radius:6px;color:#0B1014;font:700 12px -apple-system,system-ui;letter-spacing:.08em;padding:0 16px;cursor:pointer">ENTER</button>
+<input name="t" placeholder="Access code" autocomplete="off" style="flex:1;background:#1A2226;border:1px solid #313D37;border-radius:8px;color:#E9EDEA;font:13px ui-monospace,Menlo,monospace;padding:10px 12px">
+<button style="background:#4CBE8D;border:0;border-radius:8px;color:#141A1E;font:600 13px -apple-system,system-ui;padding:0 18px;cursor:pointer">Unlock</button>
 </form></div></body>`;
   return {
     kind: "denied",
