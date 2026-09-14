@@ -1,0 +1,13 @@
+{
+  "name": "FF Control Room",
+  "short_name": "Control Room",
+  "description": "Four fronts. One room. Read-only by doctrine.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0B1014",
+  "theme_color": "#0B1014",
+  "icons": [
+    { "src": "/icon-180.png", "sizes": "180x180", "type": "image/png" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}

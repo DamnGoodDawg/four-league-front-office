@@ -43,3 +43,12 @@ Robustness (this is what makes scraping acceptable as permanent, not fragile):
 - Cookie expiry surfaces as status "session-expired" with a re-grab prompt.
 
 If the API is ever approved, it swaps in behind `fetchYahooLeague`'s NormalizedLeague return with no other changes — a bonus, not a dependency. Yahoo write-back (future phase) will be browser-automation regardless, since the Yahoo API never offered writes to anyone.
+
+## D11 — Identity: "FF Control Room" (2026-09-13, Taylor)
+UI branded FF Control Room: situation-room/geopolitical ops aesthetic, deliberately over-serious, dark-only (a control room has no light mode), mixed with proven fantasy-app conventions (live matchup cards, player status colors, waiver flows). Worker/infra name and URL unchanged; only the product face renames.
+
+## D12 — Digests are in-app briefings; DD texts stay short (2026-09-13, Taylor)
+Any digest/analysis reads like a sports article INSIDE the app (Briefings section). DD texts are one short line + a link to the app — never long, never frequent. Applies to the Tuesday waiver digest and all Phase 3 output.
+
+## D13 — LLM runtime: Claude CLI scheduled on the Mac (2026-09-13, Taylor)
+Use the house pattern — other projects on this Mac already schedule Claude CLI runs successfully (see their launchd/scheduling scaffolding, e.g. the Tempest setup, before building new). Jobs read the Worker's analysis bundle, write briefings/advice back via authenticated endpoint, ping via DD per D12.

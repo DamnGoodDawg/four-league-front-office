@@ -44,3 +44,7 @@ All jobs deliver via DD text + dashboard, always citing sources (D6), always dee
 1. **Aesthetic direction** (Phase 1): a) evolve current dark scoreboard + athletic condensed type (recommended); b) clean light "paper almanac" look; c) broadcast-graphics maximal. 
 2. **LLM runtime** (Phase 2/3): a) **scheduled Claude Code tasks on the Mac (recommended)** — uses the existing subscription (no per-call API cost), can search the web for news, and owns DD texting natively; writes advice to the Worker via `/api/advice`; b) Anthropic API key called from the Worker on cron — fully serverless, works with the Mac asleep, but adds API billing and needs a key.
    - Note the honest tradeoff: (a) requires the Mac to be on at job times; (b) costs money per run. A hybrid is possible later (Worker does rule-based always; Mac does LLM when awake).
+
+## Additions from the fantasy-app UI scan (2026-09-13)
+Stolen into Phase 1: ESPN's pinned always-visible scores (our all-fronts ticker); dense mono rows; staleness always visible (their 2025 redesign died on slowness + silent zeros — our anti-goals confirmed).
+Queued for Phase 2 plumbing: **Sleeper trending add/drop API** (free, public — `players/nfl/trending`) as waiver signal + ▲▼ chips on players; **cross-league transaction feed** (ESPN `mPendingTransactions` view + Yahoo transactions page); day-aware action stack ("Tue: waivers close in A + C") lands with Phase 3 scheduling.

@@ -1,6 +1,16 @@
 import type { AdviceItem, LeagueRow, MatchupRow, RosterSlotRow, TeamRow } from "./model";
 import { yahooLeagueLink } from "./yahoo";
 
+export interface StandingRow {
+  team_id: string;
+  name: string;
+  wins: number;
+  losses: number;
+  ties: number;
+  points_for: number;
+  is_mine: number;
+}
+
 export interface LeagueView {
   id: string;
   platform: string;
@@ -15,26 +25,49 @@ export interface LeagueView {
     opp_proj: number;
     opp_name: string;
     opp_record: string;
+    /** Starters with 0.0 actual so far (heuristic for "yet to fire"). */
+    my_zero: number;
+    /** null when we don't sync that opponent's roster (Yahoo, until Phase 2). */
+    opp_zero: number | null;
   } | null;
   alerts: Array<Pick<AdviceItem, "type" | "severity" | "message" | "deep_link">>;
   roster: Array<{
     slot: string; player: string; position: string; status: string;
     proj: number; actual: number; is_starter: number;
   }>;
+  standings: StandingRow[];
+}
+
+export interface BriefingRow {
+  id: number;
+  kind: string;
+  week: number;
+  title: string;
+  body: string;
+  created_at: string;
 }
 
 export interface DataPayload {
   generated_at: string;
   leagues: LeagueView[];
-  yahoo: {
-    configured: boolean;
-    link: string;
-    note: string;
-  };
+  briefings: BriefingRow[];
+  yahoo: { configured: boolean; link: string; note: string };
   sync_log: Array<{ source: string; status: string; detail: string; at: string }>;
 }
 
 const SEVERITY_ORDER = `CASE severity WHEN 'critical' THEN 0 WHEN 'warning' THEN 1 ELSE 2 END`;
+
+async function zeroStarterCount(env: Env, leagueId: string, teamId: string, week: number): Promise<number | null> {
+  const row = await env.DB.prepare(
+    `SELECT COUNT(*) AS zeros, SUM(1) AS total FROM roster_slots
+     WHERE league_id = ?1 AND team_id = ?2 AND week = ?3 AND is_starter = 1 AND actual_points = 0`,
+  ).bind(leagueId, teamId, week).first<{ zeros: number }>();
+  const any = await env.DB.prepare(
+    `SELECT COUNT(*) AS n FROM roster_slots WHERE league_id = ?1 AND team_id = ?2 AND week = ?3`,
+  ).bind(leagueId, teamId, week).first<{ n: number }>();
+  if (!any || any.n === 0) return null; // we don't have that roster
+  return row?.zeros ?? 0;
+}
 
 export async function buildData(env: Env): Promise<DataPayload> {
   const leagues = (await env.DB.prepare(`SELECT * FROM leagues ORDER BY name`).all<LeagueRow>()).results;
@@ -63,6 +96,8 @@ export async function buildData(env: Env): Promise<DataPayload> {
         opp_proj: iAmHome ? matchup.away_proj : matchup.home_proj,
         opp_name: opp?.name ?? "Bye",
         opp_record: opp ? `${opp.wins}-${opp.losses}${opp.ties ? `-${opp.ties}` : ""}` : "",
+        my_zero: (await zeroStarterCount(env, lg.id, lg.my_team_id, lg.current_week)) ?? 0,
+        opp_zero: oppId ? await zeroStarterCount(env, lg.id, oppId, lg.current_week) : null,
       };
     }
 
@@ -81,6 +116,13 @@ export async function buildData(env: Env): Promise<DataPayload> {
       ).bind(lg.id, lg.my_team_id, lg.current_week).all<LeagueView["roster"][number]>()
     ).results;
 
+    const standings: StandingRow[] = teams
+      .map((t) => ({
+        team_id: t.team_id, name: t.name, wins: t.wins, losses: t.losses,
+        ties: t.ties, points_for: t.points_for, is_mine: t.is_mine,
+      }))
+      .sort((a, b) => b.wins - a.wins || a.losses - b.losses || b.points_for - a.points_for);
+
     views.push({
       id: lg.id,
       platform: lg.platform,
@@ -91,8 +133,15 @@ export async function buildData(env: Env): Promise<DataPayload> {
       matchup: matchupView,
       alerts: alerts.map((a) => ({ type: a.type, severity: a.severity, message: a.message, deep_link: a.deep_link })),
       roster,
+      standings,
     });
   }
+
+  const briefings = (
+    await env.DB.prepare(
+      `SELECT id, kind, week, title, body, created_at FROM briefings ORDER BY id DESC LIMIT 12`,
+    ).all<BriefingRow>()
+  ).results;
 
   const syncLog = (
     await env.DB.prepare(`SELECT source, status, detail, at FROM sync_log ORDER BY id DESC LIMIT 8`).all<
@@ -105,10 +154,11 @@ export async function buildData(env: Env): Promise<DataPayload> {
   return {
     generated_at: new Date().toISOString(),
     leagues: views,
+    briefings,
     yahoo: {
       configured: yahooConfigured,
-      link: yahooLeagueLink(env.YAHOO_LEAGUE_ID ?? ""),
-      note: lastYahoo?.detail ?? "API application under Yahoo review (1–2 weeks quoted). Interim: sign in to Yahoo and add YAHOO_COOKIE + YAHOO_LEAGUE_ID.",
+      link: yahooLeagueLink(env.YAHOO_LEAGUE_ID ?? "", env.YAHOO_TEAM_ID),
+      note: lastYahoo?.detail ?? "Yahoo uplink not configured.",
     },
     sync_log: syncLog,
   };

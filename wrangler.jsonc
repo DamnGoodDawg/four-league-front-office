@@ -12,6 +12,8 @@
   "vars": {
     "ESPN_SEASON": "2026"
   },
+  // Public static assets (PWA manifest + icons only — nothing sensitive).
+  "assets": { "directory": "./public" },
   "d1_databases": [
     {
       "binding": "DB",
